@@ -22,8 +22,12 @@
 ## ---------------------------------------------------------------------
 import unittest
 import itertools
+import numpy as np
 import adcc
 import adcc.backends
+
+from adcc.adc_pp.matrix import AdcBlock
+from adcc import OneParticleOperator, AmplitudeVector
 
 from numpy.testing import assert_allclose
 
@@ -52,7 +56,7 @@ methods = ["adc1", "adc2", "adc3"]
 @pytest.mark.skipif(len(backends) == 0, reason="No backend found.")
 @expand_test_templates(list(itertools.product(basissets, methods, backends)))
 class TestPolarizableEmbedding(unittest.TestCase):
-    def template_pe_formaldehyde(self, basis, method, backend):
+    def template_pe_formaldehyde_perturbative(self, basis, method, backend):
         basename = f"formaldehyde_{basis}_pe_{method}"
         qc_result = qchem_data[basename]
         pe_options = {"potfile": pe_potentials["fa_6w"]}
@@ -82,3 +86,39 @@ class TestPolarizableEmbedding(unittest.TestCase):
             state.pe_ptlr_correction,
             atol=1e-5
         )
+
+    def test_pe_formaldehyde_coupling_sto3g_pe_adc2(self):
+        basis = "sto-3g"
+        method = "adc2"
+        backend = "pyscf"
+        pe_options = {"potfile": pe_potentials["fa_6w"]}
+        scfres = cached_backend_hf(backend, "formaldehyde", basis,
+                                   pe_options=pe_options)
+        assert_allclose(scfres.energy_scf, -112.36904349555, atol=1e-8)
+
+        # construct a normal ADC matrix
+        matrix = adcc.AdcMatrix(method, scfres)
+
+        # additional matrix apply for PE
+        def block_ph_ph_0_pe(hf, mp, intermediates):
+            op = hf.operators
+
+            def apply(ampl):
+                tdm = OneParticleOperator(mp, is_symmetric=False)
+                tdm.vo = ampl.ph.transpose()
+                vpe = op.density_dependent_operators["pe_induction_elec"](tdm)
+                return AmplitudeVector(ph=vpe.ov)
+            return AdcBlock(apply, 0)
+
+        # register the additional function with the matrix
+        # this should be implemented in the AdcMatrix ctor
+        # (to also get all the diagonal setup right)
+        matrix.blocks_ph['ph_ph_pe'] = block_ph_ph_0_pe(
+            matrix.reference_state, matrix.ground_state, matrix.intermediates
+        )
+        assert_allclose(matrix.ground_state.energy(2), -112.4804685653, atol=1e-8)
+        exci_tm = np.array([
+            0.1733632144, 0.3815240343, 0.5097618218, 0.5189443358, 0.5670575778
+        ])
+        state = adcc.run_adc(matrix, n_singlets=5, conv_tol=1e-7)
+        assert_allclose(state.excitation_energy_uncorrected, exci_tm, atol=1e-6)
