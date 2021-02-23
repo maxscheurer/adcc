@@ -22,7 +22,6 @@
 ## ---------------------------------------------------------------------
 import unittest
 import itertools
-import numpy as np
 import adcc
 import adcc.backends
 
@@ -35,7 +34,7 @@ import pytest
 
 from ..misc import expand_test_templates
 from .testing import cached_backend_hf
-from ..testdata.cache import qchem_data
+from ..testdata.cache import qchem_data, tmole_data
 from ..testdata.static_data import pe_potentials
 
 try:
@@ -56,7 +55,7 @@ methods = ["adc1", "adc2", "adc3"]
 @pytest.mark.skipif(len(backends) == 0, reason="No backend found.")
 @expand_test_templates(list(itertools.product(basissets, methods, backends)))
 class TestPolarizableEmbedding(unittest.TestCase):
-    def template_pe_formaldehyde_perturbative(self, basis, method, backend):
+    def template_pe_perturbative_formaldehyde(self, basis, method, backend):
         basename = f"formaldehyde_{basis}_pe_{method}"
         qc_result = qchem_data[basename]
         pe_options = {"potfile": pe_potentials["fa_6w"]}
@@ -87,14 +86,15 @@ class TestPolarizableEmbedding(unittest.TestCase):
             atol=1e-5
         )
 
-    def test_pe_formaldehyde_coupling_sto3g_pe_adc2(self):
-        basis = "sto-3g"
-        method = "adc2"
-        backend = "pyscf"
+    def template_pe_coupling_formaldehyde(self, basis, method, backend):
+        if method != "adc2":
+            pytest.skip("")
+        basename = f"formaldehyde_{basis}_pe_{method}"
+        tm_result = tmole_data[basename]
         pe_options = {"potfile": pe_potentials["fa_6w"]}
         scfres = cached_backend_hf(backend, "formaldehyde", basis,
                                    pe_options=pe_options)
-        assert_allclose(scfres.energy_scf, -112.36904349555, atol=1e-8)
+        assert_allclose(scfres.energy_scf, tm_result["energy_scf"], atol=1e-8)
 
         # construct a normal ADC matrix
         matrix = adcc.AdcMatrix(method, scfres)
@@ -116,9 +116,14 @@ class TestPolarizableEmbedding(unittest.TestCase):
         matrix.blocks_ph['ph_ph_pe'] = block_ph_ph_0_pe(
             matrix.reference_state, matrix.ground_state, matrix.intermediates
         )
-        assert_allclose(matrix.ground_state.energy(2), -112.4804685653, atol=1e-8)
-        exci_tm = np.array([
-            0.1733632144, 0.3815240343, 0.5097618218, 0.5189443358, 0.5670575778
-        ])
+        assert_allclose(
+            matrix.ground_state.energy(2),
+            tm_result["energy_mp2"],
+            atol=1e-8
+        )
         state = adcc.run_adc(matrix, n_singlets=5, conv_tol=1e-7)
-        assert_allclose(state.excitation_energy_uncorrected, exci_tm, atol=1e-6)
+        assert_allclose(
+            state.excitation_energy_uncorrected,
+            tm_result["excitation_energy"],
+            atol=1e-6
+        )

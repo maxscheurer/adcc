@@ -39,12 +39,7 @@ class PyScfOperatorIntegralProvider:
 
     @cached_property
     def electric_dipole(self):
-        if hasattr(self.scfres, "with_solvent"):
-            if self.scfres.with_solvent.eef:
-                warnings.warn("Using modified dipole operator due to EEF.")
-            return self.scfres.with_solvent.effective_dipole_operator()
-        else:
-            return list(self.scfres.mol.intor_symmetric('int1e_r', comp=3))
+        return list(self.scfres.mol.intor_symmetric('int1e_r', comp=3))
 
     @cached_property
     def magnetic_dipole(self):
